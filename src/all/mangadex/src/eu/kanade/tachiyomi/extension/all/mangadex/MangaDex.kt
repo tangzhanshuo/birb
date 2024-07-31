@@ -43,7 +43,13 @@ import okhttp3.Response
 import rx.Observable
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.security.cert.X509Certificate
 import java.util.Date
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 abstract class MangaDex(final override val lang: String, private val dexLang: String = lang) :
     ConfigurableSource, HttpSource() {
@@ -75,11 +81,32 @@ abstract class MangaDex(final override val lang: String, private val dexLang: St
         return builder
     }
 
+    val trustAllCerts = arrayOf<TrustManager>(
+        object : X509TrustManager {
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+            override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+        },
+    )
+
+    val sslContext = SSLContext.getInstance("TLS").apply {
+        init(null, trustAllCerts, java.security.SecureRandom())
+    }
+
     override val client = network.client.newBuilder()
-        .rateLimit(3)
+        .rateLimit(10)
         .addInterceptor(MdAtHomeReportInterceptor(network.client, headers))
         .addInterceptor(MdUserAgentInterceptor(preferences, dexLang))
+        .proxy(getProxyFromPreferences())
+        .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
+        .hostnameVerifier { _, _ -> true }
         .build()
+
+    private fun getProxyFromPreferences(): Proxy {
+        val host = preferences.getString("pref_proxy_host", "127.0.0.1") ?: "127.0.0.1"
+        val port = preferences.getString("pref_proxy_port", "8080")?.toIntOrNull() ?: 8080
+        return Proxy(Proxy.Type.HTTP, InetSocketAddress(host, port))
+    }
 
     init {
         preferences.sanitizeExistingUuidPrefs()
@@ -602,6 +629,36 @@ abstract class MangaDex(final override val lang: String, private val dexLang: St
 
     @Suppress("UNCHECKED_CAST")
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        val proxyHostPref = EditTextPreference(screen.context).apply {
+            key = "pref_proxy_host"
+            title = "Proxy Host"
+            summary = "Enter the proxy host (default: 127.0.0.1)"
+            setDefaultValue("127.0.0.1")
+
+            setOnPreferenceChangeListener { _, newValue ->
+                preferences.edit().putString("pref_proxy_host", newValue as String).apply()
+                true
+            }
+        }
+
+        val proxyPortPref = EditTextPreference(screen.context).apply {
+            key = "pref_proxy_port"
+            title = "Proxy Port"
+            summary = "Enter the proxy port (default: 8080)"
+            setDefaultValue("8080")
+
+            setOnPreferenceChangeListener { _, newValue ->
+                try {
+                    newValue.toString().toInt()
+                    preferences.edit().putString("pref_proxy_port", newValue as String).apply()
+                    true
+                } catch (e: NumberFormatException) {
+                    Toast.makeText(screen.context, "Please enter a valid port number", Toast.LENGTH_LONG).show()
+                    false
+                }
+            }
+        }
+
         val coverQualityPref = ListPreference(screen.context).apply {
             key = MDConstants.getCoverQualityPreferenceKey(dexLang)
             title = helper.intl["cover_quality"]
@@ -785,6 +842,8 @@ abstract class MangaDex(final override val lang: String, private val dexLang: St
             }
         }
 
+        screen.addPreference(proxyHostPref)
+        screen.addPreference(proxyPortPref)
         screen.addPreference(coverQualityPref)
         screen.addPreference(tryUsingFirstVolumeCoverPref)
         screen.addPreference(dataSaverPref)
