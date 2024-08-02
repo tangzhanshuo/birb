@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.extension.all.mangareaderto
 
+import androidx.preference.EditTextPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.multisrc.mangareader.MangaReader
 import eu.kanade.tachiyomi.network.GET
@@ -20,6 +21,12 @@ import org.jsoup.nodes.Element
 import org.jsoup.nodes.TextNode
 import org.jsoup.select.Evaluator
 import rx.Observable
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.security.cert.X509Certificate
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 open class MangaReader(
     override val lang: String,
@@ -28,9 +35,30 @@ open class MangaReader(
 
     override val baseUrl = "https://mangareader.to"
 
+    private val trustAllCerts = arrayOf<TrustManager>(
+        object : X509TrustManager {
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+            override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+        },
+    )
+
+    private val sslContext = SSLContext.getInstance("TLS").apply {
+        init(null, trustAllCerts, java.security.SecureRandom())
+    }
+
     override val client = network.client.newBuilder()
         .addInterceptor(ImageInterceptor)
+        .proxy(getProxyFromPreferences())
+        .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
+        .hostnameVerifier { _, _ -> true }
         .build()
+
+    private fun getProxyFromPreferences(): Proxy {
+        val host = preferences.getString("pref_proxy_host", "127.0.0.1") ?: "127.0.0.1"
+        val port = preferences.getString("pref_proxy_port", "8080")?.toIntOrNull() ?: 8080
+        return Proxy(Proxy.Type.HTTP, InetSocketAddress(host, port))
+    }
 
     override fun latestUpdatesRequest(page: Int) =
         GET("$baseUrl/filter?sort=latest-updated&language=$lang&page=$page", headers)
@@ -168,6 +196,38 @@ open class MangaReader(
     }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        val proxyHostPref = EditTextPreference(screen.context).apply {
+            key = "pref_proxy_host"
+            title = "Proxy Host"
+            summary = "Enter the proxy host (default: 127.0.0.1)"
+            setDefaultValue("127.0.0.1")
+
+            setOnPreferenceChangeListener { _, newValue ->
+                preferences.edit().putString("pref_proxy_host", newValue as String).apply()
+                true
+            }
+        }
+
+        val proxyPortPref = EditTextPreference(screen.context).apply {
+            key = "pref_proxy_port"
+            title = "Proxy Port"
+            summary = "Enter the proxy port (default: 8080)"
+            setDefaultValue("8080")
+
+            setOnPreferenceChangeListener { _, newValue ->
+                try {
+                    newValue.toString().toInt()
+                    preferences.edit().putString("pref_proxy_port", newValue as String).apply()
+                    true
+                } catch (e: NumberFormatException) {
+                    false
+                }
+            }
+        }
+
+        screen.addPreference(proxyHostPref)
+        screen.addPreference(proxyPortPref)
+
         getPreferences(screen.context).forEach(screen::addPreference)
         super.setupPreferenceScreen(screen)
     }
