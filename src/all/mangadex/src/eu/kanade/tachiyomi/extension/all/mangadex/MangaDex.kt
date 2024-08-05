@@ -38,6 +38,7 @@ import okhttp3.CacheControl
 import okhttp3.Headers
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import rx.Observable
@@ -95,17 +96,28 @@ abstract class MangaDex(final override val lang: String, private val dexLang: St
 
     override val client = network.client.newBuilder()
         .rateLimit(10)
+        .protocols(listOf(Protocol.HTTP_1_1)) // Force HTTP 1.1
         .addInterceptor(MdAtHomeReportInterceptor(network.client, headers))
         .addInterceptor(MdUserAgentInterceptor(preferences, dexLang))
-        .proxy(getProxyFromPreferences())
+        .apply {
+            val proxy = getProxyFromPreferences()
+            if (proxy != null) {
+                proxy(proxy)
+            }
+        }
         .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
         .hostnameVerifier { _, _ -> true }
         .build()
 
-    private fun getProxyFromPreferences(): Proxy {
-        val host = preferences.getString("pref_proxy_host", "127.0.0.1") ?: "127.0.0.1"
-        val port = preferences.getString("pref_proxy_port", "8080")?.toIntOrNull() ?: 8080
-        return Proxy(Proxy.Type.HTTP, InetSocketAddress(host, port))
+    private fun getProxyFromPreferences(): Proxy? {
+        val host = preferences.getString("pref_proxy_host", "")
+        val port = preferences.getString("pref_proxy_port", "")?.toIntOrNull()
+
+        return if (host.isNullOrBlank() || port == null) {
+            null
+        } else {
+            Proxy(Proxy.Type.HTTP, InetSocketAddress(host, port))
+        }
     }
 
     init {

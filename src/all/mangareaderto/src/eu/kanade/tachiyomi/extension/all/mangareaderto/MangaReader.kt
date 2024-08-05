@@ -13,6 +13,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
@@ -49,15 +50,26 @@ open class MangaReader(
 
     override val client = network.client.newBuilder()
         .addInterceptor(ImageInterceptor)
-        .proxy(getProxyFromPreferences())
+        .protocols(listOf(Protocol.HTTP_1_1)) // Force HTTP 1.1
+        .apply {
+            val proxy = getProxyFromPreferences()
+            if (proxy != null) {
+                proxy(proxy)
+            }
+        }
         .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
         .hostnameVerifier { _, _ -> true }
         .build()
 
-    private fun getProxyFromPreferences(): Proxy {
-        val host = preferences.getString("pref_proxy_host", "127.0.0.1") ?: "127.0.0.1"
-        val port = preferences.getString("pref_proxy_port", "8080")?.toIntOrNull() ?: 8080
-        return Proxy(Proxy.Type.HTTP, InetSocketAddress(host, port))
+    private fun getProxyFromPreferences(): Proxy? {
+        val host = preferences.getString("pref_proxy_host", "")
+        val port = preferences.getString("pref_proxy_port", "")?.toIntOrNull()
+
+        return if (host.isNullOrBlank() || port == null) {
+            null
+        } else {
+            Proxy(Proxy.Type.HTTP, InetSocketAddress(host, port))
+        }
     }
 
     override fun latestUpdatesRequest(page: Int) =
