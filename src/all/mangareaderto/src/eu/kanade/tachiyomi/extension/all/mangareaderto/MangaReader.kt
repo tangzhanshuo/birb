@@ -62,13 +62,16 @@ open class MangaReader(
         .build()
 
     private fun getProxyFromPreferences(): Proxy? {
-        val host = preferences.getString("pref_proxy_host", "")
-        val port = preferences.getString("pref_proxy_port", "")?.toIntOrNull()
+        val useProxy = preferences.getBoolean("pref_use_proxy", false)
+        if (!useProxy) return null
 
-        return if (host.isNullOrBlank() || port == null) {
-            null
-        } else {
+        val host = preferences.getString("pref_proxy_host", "") ?: ""
+        val port = preferences.getString("pref_proxy_port", "")?.toIntOrNull() ?: 0
+
+        return if (host.isNotBlank() && port > 0) {
             Proxy(Proxy.Type.HTTP, InetSocketAddress(host, port))
+        } else {
+            null
         }
     }
 
@@ -208,6 +211,18 @@ open class MangaReader(
     }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        val useProxyPref = androidx.preference.SwitchPreferenceCompat(screen.context).apply {
+            key = "pref_use_proxy"
+            title = "Use Proxy"
+            summary = "Enable to use a proxy server"
+            setDefaultValue(false)
+
+            setOnPreferenceChangeListener { _, newValue ->
+                preferences.edit().putBoolean("pref_use_proxy", newValue as Boolean).apply()
+                true
+            }
+        }
+
         val proxyHostPref = EditTextPreference(screen.context).apply {
             key = "pref_proxy_host"
             title = "Proxy Host"
@@ -237,6 +252,7 @@ open class MangaReader(
             }
         }
 
+        screen.addPreference(useProxyPref)
         screen.addPreference(proxyHostPref)
         screen.addPreference(proxyPortPref)
 

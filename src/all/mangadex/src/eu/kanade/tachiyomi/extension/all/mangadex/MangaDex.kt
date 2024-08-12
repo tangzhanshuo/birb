@@ -110,13 +110,16 @@ abstract class MangaDex(final override val lang: String, private val dexLang: St
         .build()
 
     private fun getProxyFromPreferences(): Proxy? {
-        val host = preferences.getString("pref_proxy_host", "")
-        val port = preferences.getString("pref_proxy_port", "")?.toIntOrNull()
+        val useProxy = preferences.getBoolean("pref_use_proxy", false)
+        if (!useProxy) return null
 
-        return if (host.isNullOrBlank() || port == null) {
-            null
-        } else {
+        val host = preferences.getString("pref_proxy_host", "") ?: ""
+        val port = preferences.getString("pref_proxy_port", "")?.toIntOrNull() ?: 0
+
+        return if (host.isNotBlank() && port > 0) {
             Proxy(Proxy.Type.HTTP, InetSocketAddress(host, port))
+        } else {
+            null
         }
     }
 
@@ -641,6 +644,18 @@ abstract class MangaDex(final override val lang: String, private val dexLang: St
 
     @Suppress("UNCHECKED_CAST")
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        val useProxyPref = androidx.preference.SwitchPreferenceCompat(screen.context).apply {
+            key = "pref_use_proxy"
+            title = "Use Proxy"
+            summary = "Enable to use a proxy server"
+            setDefaultValue(false)
+
+            setOnPreferenceChangeListener { _, newValue ->
+                preferences.edit().putBoolean("pref_use_proxy", newValue as Boolean).apply()
+                true
+            }
+        }
+
         val proxyHostPref = EditTextPreference(screen.context).apply {
             key = "pref_proxy_host"
             title = "Proxy Host"
@@ -665,7 +680,6 @@ abstract class MangaDex(final override val lang: String, private val dexLang: St
                     preferences.edit().putString("pref_proxy_port", newValue as String).apply()
                     true
                 } catch (e: NumberFormatException) {
-                    Toast.makeText(screen.context, "Please enter a valid port number", Toast.LENGTH_LONG).show()
                     false
                 }
             }
@@ -854,6 +868,7 @@ abstract class MangaDex(final override val lang: String, private val dexLang: St
             }
         }
 
+        screen.addPreference(useProxyPref)
         screen.addPreference(proxyHostPref)
         screen.addPreference(proxyPortPref)
         screen.addPreference(coverQualityPref)
